@@ -1,8 +1,11 @@
 //! This module contains the [IncrementalMerkleTree], an implementation of the incremental Merkle Tree data structure
 //! used in the [ETH2 Deposit Contract](https://etherscan.io/address/0x00000000219ab540356cbb839cbe05303d7705fa).
 
+use core::marker::PhantomData;
+
 use alloc::{vec, vec::Vec};
-use alloy::primitives::{keccak256, B256};
+use alloy::primitives::B256;
+use digest::Digest;
 
 /// The error type for the [IncrementalMerkleTree].
 #[derive(Debug)]
@@ -15,9 +18,9 @@ pub enum IncrementalMerkleTreeError {
     IndexOutOfBounds,
 }
 
-/// [IncrementalMerkleTree] is an append-only merkle tree of generic height, using `keccak256` as the
+/// [IncrementalMerkleTree] is an append-only merkle tree of generic height, using `HASHER::digesst` as the
 /// hash function.
-pub struct IncrementalMerkleTree<const HEIGHT: usize> {
+pub struct IncrementalMerkleTree<const HEIGHT: usize, HASHER> {
     /// The zero hashes
     zero_hashes: [B256; HEIGHT],
     /// The active branch of the tree, used to calculate the root hash
@@ -30,15 +33,26 @@ pub struct IncrementalMerkleTree<const HEIGHT: usize> {
     /// Signals whether the intermediate cache is valid. Cache validation is global, and all levels above
     /// the leaves will be recomputed during proof generation if it is invalid.
     cache_valid: bool,
+
+    /// The hash algorithm to be used throughout the tree.
+    hasher: PhantomData<HASHER>,
 }
 
-impl<const HEIGHT: usize> Default for IncrementalMerkleTree<HEIGHT> {
+impl<const HEIGHT: usize, HASHER> Default for IncrementalMerkleTree<HEIGHT, HASHER>
+where
+    HASHER: Digest,
+    HASHER::OutputSize: digest::typenum::IsEqual<digest::typenum::U32>,
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<const HEIGHT: usize> IncrementalMerkleTree<HEIGHT> {
+impl<const HEIGHT: usize, HASHER> IncrementalMerkleTree<HEIGHT, HASHER>
+where
+    HASHER: Digest,
+    HASHER::OutputSize: digest::typenum::IsEqual<digest::typenum::U32>,
+{
     /// Create a new [IncrementalMerkleTree] with a height of `height`. This function will precompute the zero hashes
     /// for the tree.
     pub fn new() -> Self {
@@ -47,7 +61,7 @@ impl<const HEIGHT: usize> IncrementalMerkleTree<HEIGHT> {
         (1..HEIGHT).for_each(|height| {
             hash_buf[..32].copy_from_slice(zero_hashes[height - 1].as_slice());
             hash_buf[32..].copy_from_slice(zero_hashes[height - 1].as_slice());
-            zero_hashes[height] = keccak256(hash_buf);
+            zero_hashes[height] = Self::hash(hash_buf);
         });
         let intermediates = vec![B256::default(); (1 << (HEIGHT as u32 + 1)) - 1];
 
@@ -57,6 +71,7 @@ impl<const HEIGHT: usize> IncrementalMerkleTree<HEIGHT> {
             size: 0,
             intermediates,
             cache_valid: false,
+            hasher: PhantomData,
         }
     }
 
@@ -76,7 +91,7 @@ impl<const HEIGHT: usize> IncrementalMerkleTree<HEIGHT> {
                 hash_buf[32..].copy_from_slice(self.zero_hashes[height].as_slice());
             }
             size >>= 1;
-            keccak256(hash_buf)
+            Self::hash(hash_buf)
         })
     }
 
@@ -115,7 +130,7 @@ impl<const HEIGHT: usize> IncrementalMerkleTree<HEIGHT> {
 
             hash_buf[..32].copy_from_slice(self.active_branch[height].as_slice());
             hash_buf[32..].copy_from_slice(intermediate.as_slice());
-            intermediate = keccak256(hash_buf);
+            intermediate = Self::hash(hash_buf);
             size >>= 1;
         }
 
@@ -138,7 +153,7 @@ impl<const HEIGHT: usize> IncrementalMerkleTree<HEIGHT> {
                 hash_buf[..32].copy_from_slice(value.as_slice());
                 hash_buf[32..].copy_from_slice(proof[height].as_slice());
             }
-            keccak256(hash_buf)
+            Self::hash(hash_buf)
         }) == self.root()
     }
 
@@ -198,21 +213,27 @@ impl<const HEIGHT: usize> IncrementalMerkleTree<HEIGHT> {
 
                 hash_buf[..32].copy_from_slice(self.intermediates[(i << 1) - 1].as_slice());
                 hash_buf[32..].copy_from_slice(self.intermediates[i << 1].as_slice());
-                self.intermediates[i - 1] = keccak256(hash_buf);
+                self.intermediates[i - 1] = Self::hash(hash_buf);
             }
         });
         self.cache_valid = true;
+    }
+
+    fn hash(hash_buf: [u8; 64]) -> B256 {
+        B256::from_slice(&HASHER::digest(hash_buf))
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::IncrementalMerkleTree;
-    use alloy::primitives::{keccak256, B256};
+    use alloy::primitives::B256;
+
+    type IMT<const HEIGHT: usize> = IncrementalMerkleTree<HEIGHT, sha2::Sha256>;
 
     #[test]
     fn test_static_tree_root() {
-        let mut tree = IncrementalMerkleTree::<2>::new();
+        let mut tree = IMT::<2>::new();
         tree.append([1u8; 32].into()).unwrap();
 
         // Compute the root manually to compare against the tree's root.
@@ -220,11 +241,11 @@ mod test {
             let mut hash_buf = [0u8; 64];
             hash_buf[..32].copy_from_slice([1u8; 32].as_slice());
             hash_buf[32..].copy_from_slice([0u8; 32].as_slice());
-            let left = keccak256(hash_buf);
+            let left = IMT::<2>::hash(hash_buf);
             let right = tree.zero_hashes[1];
             hash_buf[..32].copy_from_slice(left.as_slice());
             hash_buf[32..].copy_from_slice(right.as_slice());
-            keccak256(hash_buf)
+            IMT::<2>::hash(hash_buf)
         };
 
         assert_eq!(tree.size, 1);
@@ -233,7 +254,7 @@ mod test {
 
     #[test]
     fn test_static_tree_proof() {
-        let mut tree = IncrementalMerkleTree::<2>::new();
+        let mut tree = IMT::<2>::new();
         tree.append([1u8; 32].into()).unwrap();
 
         // Compute the proof manually to verify.
@@ -250,7 +271,7 @@ mod test {
 
     #[test]
     fn test_gen_proof() {
-        let mut tree = IncrementalMerkleTree::<8>::new();
+        let mut tree = IMT::<8>::new();
         for i in 0..1 << (8 - 1) {
             tree.append([i as u8; 32].into()).unwrap();
         }
@@ -263,7 +284,7 @@ mod test {
 
     #[test]
     fn test_tree_overflow() {
-        let mut tree = IncrementalMerkleTree::<2>::new();
+        let mut tree = IMT::<2>::new();
         for _ in 0..3 {
             tree.append([1u8; 32].into()).unwrap();
         }
