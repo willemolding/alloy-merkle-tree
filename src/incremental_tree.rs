@@ -137,13 +137,28 @@ where
         Err(IncrementalMerkleTreeError::LoopDidNotTerminate)
     }
 
-    /// Verifies a merkle proof against the tree's root hash for a leaf at a given index within the tree.
+    /// Verifies a merkle proof against an instance of a tree
     /// Reference: <https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_valid_merkle_branch>
     ///
     /// # Returns
     /// - `true` - If the proof is valid.
     /// - `false` - If the proof is invalid.
     pub fn verify_proof(&self, leaf: B256, index: usize, proof: &[B256; HEIGHT]) -> bool {
+        Self::verify_proof_against_root(self.root(), leaf, index, proof)
+    }
+
+    /// Verifies a merkle proof against the tree's root hash for a leaf at a given index within the tree.
+    /// Reference: <https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/beacon-chain.md#is_valid_merkle_branch>
+    ///
+    /// # Returns
+    /// - `true` - If the proof is valid.
+    /// - `false` - If the proof is invalid.
+    pub fn verify_proof_against_root(
+        root: B256,
+        leaf: B256,
+        index: usize,
+        proof: &[B256; HEIGHT],
+    ) -> bool {
         let mut hash_buf = [0u8; 64];
         (0..HEIGHT).fold(leaf, |value, height| {
             if ((index >> height) & 1) == 1 {
@@ -154,7 +169,7 @@ where
                 hash_buf[32..].copy_from_slice(proof[height].as_slice());
             }
             Self::hash(hash_buf)
-        }) == self.root()
+        }) == root
     }
 
     /// Generate a merkle proof for a leaf at a given index within the tree.
