@@ -4,7 +4,7 @@
 use core::marker::PhantomData;
 
 use alloc::{vec, vec::Vec};
-use alloy::primitives::B256;
+use alloy_primitives::B256;
 use digest::Digest;
 
 /// The error type for the [IncrementalMerkleTree].
@@ -242,7 +242,7 @@ where
 #[cfg(test)]
 mod test {
     use super::IncrementalMerkleTree;
-    use alloy::primitives::B256;
+    use alloy_primitives::B256;
 
     type IMT<const HEIGHT: usize> = IncrementalMerkleTree<HEIGHT, sha2::Sha256>;
 

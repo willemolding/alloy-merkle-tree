@@ -4,7 +4,7 @@
 //!
 //! ```rust
 //! use alloy_merkle_tree::tree::MerkleTree;
-//! use alloy::primitives::{B256, U256};
+//! use alloy_primitives::{B256, U256};
 //!
 //! let mut tree = MerkleTree::new();
 //! // Number of leaves should be a power of 2 for a perfect binary tree
@@ -22,7 +22,7 @@
 //!
 
 use alloc::vec::Vec;
-use alloy::primitives::{Keccak256, B256};
+use alloy_primitives::{Keccak256, B256};
 
 /// Represents a Merkle proof for a specific leaf in the Merkle tree.
 #[derive(Debug)]
@@ -146,10 +146,7 @@ impl MerkleTree {
     /// An `Option` containing the `MerkleProof` if the leaf is found, or `None` if not.
     pub fn create_proof(&self, leaf: &B256) -> Option<MerkleProof> {
         // Find the index of the leaf in the list of leaves
-        let mut index = match self.leaves.iter().position(|x| x == leaf) {
-            Some(index) => index,
-            None => return None, // Leaf not found
-        };
+        let mut index = self.leaves.iter().position(|x| x == leaf)?;
 
         let mut proof = MerkleProof {
             leaf: *leaf,
@@ -206,7 +203,7 @@ impl MerkleTree {
 #[cfg(test)]
 mod test {
     use crate::tree::MerkleTree;
-    use alloy::primitives::{B256, U256};
+    use alloy_primitives::{B256, U256};
 
     /// Tests the basic functionality of the [`MerkleTree`].
     #[test]
